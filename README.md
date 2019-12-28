@@ -26,6 +26,19 @@
     - [Redirecting STDOUT](#redirecting-stdout)
     - [Using the noclobber Option](#using-the-noclobber-option)
     - [Redirecting STDERR](#redirecting-stderr)
+    - [Reading into STDIN](#reading-into-stdin)
+    - [Using HERE documents](#using-here-documents)
+    - [Command Pipelines](#command-pipelines)
+    - [Named Pipes](#named-pipes)
+    - [Using the Command tee](#using-the-command-tee)
+  - [Archiving Files](#archiving-files)
+    - [Using the tar Command](#using-the-tar-command)
+    - [Using Compression](#using-compression)
+  - [Understanding File Permissions](#understanding-file-permissions)
+    - [Listing Permissions](#listing-permissions)
+    - [Managing Default Permissions](#managing-default-permissions)
+    - [Setting Permissions](#setting-permissions)
+    - [Managing File Ownership](#managing-file-ownership)
 
 <!-- END doctoc generated TOC please keep comment here to allow auto update -->
 
@@ -43,9 +56,23 @@ My simple version with [Docker](https://hub.docker.com/_/centos):
 $ docker pull centos:7
 $ docker run --name centoscourse -d centos:7 tail -f /dev/null
 $ docker exec -it centoscourse bash
+
+# additional packages needed
 $ yum install redhat-lsb-core # not sure if this is required
 $ yum install which
 $ yum install tree
+$ yum install vim
+$ yum install sudo
+
+# add a non-root user
+$ adduser course
+$ passwod course # set and confirm at least 8 char password
+$ gpasswd -a username wheel
+
+# attempt mail -> not working
+$ vim /etc/postfix/main.cf
+# inet_interfaces = 127.0.0.1, 172.17.0.2
+$ mkfifo /var/spool/postfix/public/pickup
 ```
 
 Next time when container already exists:
@@ -1202,10 +1229,694 @@ $ vim .bashrc
 # add "set -o noclobber" in User section, then save and quit
 ```
 
-To turn the option off: `set +o noclobber'
+To turn the option off: `set +o noclobber`
 
 `-o` turn option on
 
 `+o` turn option off
 
 ### Redirecting STDERR
+
+When things go wrong.
+
+When everything goes well, eg `ls /etc` - results go to standard out, the screen.
+
+When something goes wrong, eg trying to view a dir that doesn't exist, output no longer goes to standard output, even on redirection.
+
+`2>` redirect to standard error.
+
+```shell
+$ ls /etcw
+ls: cannot access /etcw: No such file or directory
+$ ls /etcw > err
+ls: cannot access /etcw: No such file or directory
+$ cat err # empty file
+$ ls /etcw 2> errfile
+$ cat errfile
+ls: cannot access /etcw: No such file or directory
+```
+
+`find` command example where some results are permission denied, since it's known will be some errors, redirect then to `/dev/null`, then output can be displayed without errors.
+
+`/dev/null` - special device file, used when don't want to see the output.
+
+First switch to a non-root user:
+
+```shell
+$ su - course
+$ find /etc -type l
+find: '/etc/ntp/crypto': Permission denied
+/etc/rc4.d
+/etc/alternatives/libnssckbi.so.x86_64
+/etc/alternatives/ld
+/etc/alternatives/mta-aliasesman
+...
+$ find /etc -type l 2> /dev/null
+/etc/rc4.d
+/etc/alternatives/libnssckbi.so.x86_64
+/etc/alternatives/ld
+/etc/alternatives/mta-aliasesman
+/etc/alternatives/mta
+...
+```
+
+`&>` - Redirect both standard output and standard error to same file
+
+```shell
+$ find /etc -type l &> all.txt
+/etc/rc4.d
+/etc/alternatives/libnssckbi.so.x86_64
+/etc/alternatives/ld
+/etc/alternatives/mta-aliasesman
+...
+find: '/etc/ntp/crypto': Permission denied
+```
+
+### Reading into STDIN
+
+`df -hlT` Show diskfile system, human readable, only local, also show file system type. Might want an email report of this:
+
+`<` read in from standard input
+
+```shell
+$ df -hlT
+Filesystem     Type     Size  Used Avail Use% Mounted on
+overlay        overlay   59G  1.6G   54G   3% /
+tmpfs          tmpfs     64M     0   64M   0% /dev
+tmpfs          tmpfs   1000M     0 1000M   0% /sys/fs/cgroup
+shm            tmpfs     64M     0   64M   0% /dev/shm
+/dev/sda1      ext4      59G  1.6G   54G   3% /etc/hosts
+tmpfs          tmpfs   1000M     0 1000M   0% /proc/acpi
+tmpfs          tmpfs   1000M     0 1000M   0% /sys/firmware
+$ df -hlT > diskfree
+# Send local mail to course user with subject Disk Free, reading in from diskfree file for mail body
+$ mail -s "Disk Free" course < diskfree # not working for me in container
+```
+
+### Using HERE documents
+
+Good for creating small documents at command line.
+
+`>>SOMEINDICATOR` - heredoc, when SOMEINDICATOR appears that indicates end of document but doesn't become part of document.
+
+```shell
+$ cat > mynewfile <<END
+> this is a little
+> file that we can create
+> even with scripts
+> END
+$ cat mynewfile
+this is a little
+file that we can create
+even with scripts
+```
+
+### Command Pipelines
+
+Linux has many small commands, designed to be linked together with pipelines.
+
+`|` unnamed pipe
+
+```shell
+# pipe output of ls through word count for number of lines
+$ ls | wc -l
+9 # i.e. 9 files were listed from ls command
+$ head -n1 /etc/passwod
+root:x:0:0:root:/root:/bin/bash # output is fields separted by colon
+$ cut -f7 -d: /etc/passwd # cut field 7 using colon delimiter -> show all the different default shells
+/bin/bash
+/sbin/nologin
+/sbin/nologin
+/sbin/nologin
+/sbin/nologin
+/bin/sync
+/sbin/shutdown
+/sbin/halt
+/sbin/nologin
+/sbin/nologin
+...
+/bin/bash
+# send the output of above through sort
+cut -f7 -d: /etc/passwd | sort
+/bin/bash
+/bin/bash
+/bin/sync
+/sbin/halt
+/sbin/nologin
+/sbin/nologin
+/sbin/nologin
+...
+/sbin/shutdown
+# and pipe through uniq
+$ cut -f7 -d: /etc/passwd | sort | uniq
+/bin/bash
+/bin/sync
+/sbin/halt
+/sbin/nologin
+/sbin/shutdown
+# count how many different shells
+$ cut -f7 -d: /etc/passwd | sort | uniq | wc -l
+5
+```
+
+### Named Pipes
+
+Used for IPC - Interprocess communication - allowing different processes to talk to each other, where those processes are running in different shells - implemented with *named pipes* - special type of file - notice `p` character.
+
+`mkfifo` create a named pipe, first-in/first-out - queues info until its serviced
+
+```shell
+$ mkfifo mypipe
+$ ls -l !$
+$ ls -l mypipe
+prw-r--r-- 1 root root 0 Dec 26 23:56 mypipe # p indicates its a pipe file type
+$ ls -F mypipe
+mypipe| # pipe character at end indicates this is a pipe file type
+```
+
+Pipe file can be used in same way as `|` but not limited to being in same shell session.
+
+Named pipe never holds any information, rather, it marshals info from one process to another.
+
+Open another terminal and connect to centos container.
+
+```shell
+# terminal 2
+$ ls > mypipe # send output of ls through to named pipe
+# command is held up until pipe is read in other terminal, then returns
+
+# terminal 1
+$ wc -l < mypipe # read input from named pipe
+10 # count of how many files `ls` command returned in terminal 2
+```
+
+### Using the Command tee
+
+`tee` redirect to file *and* display in console. Input comes in via pipe, then output goes out in two directions.
+
+`tee` with no additional options will overwrite file if it already exists.
+
+`tee -a` append to file.
+
+```shell
+$ ls > f89 # writes through to f89 but don't see output on screen
+$ ls | tee ftee # output displayed on screen
+anaconda-ks.cfg
+diskfree
+err
+errfile
+f89
+file1
+file2
+file99
+mynewfile
+mypipe
+newfile
+$ cat ftee # output also got redirected to file named `ftee`
+anaconda-ks.cfg
+diskfree
+err
+errfile
+f89
+file1
+file2
+file99
+mynewfile
+mypipe
+newfile
+```
+
+Use when don't have permission to write to a file, but able to use `sudo`. In example below, `echo` command is running with `sudo` privileges but redirection falls back to standard user permissions.
+
+```shell
+$ su - course
+$ ls -l /etc/hosts
+-rw-r--r-- 1 root root 174 Dec 27 12:58 /etc/hosts # course user does not have write permission
+$ sudo echo '127.0.0.1 bob' >> /etc/hosts
+-bash: /etc/hosts: Permission denied
+# solution is to redirect output of echo through to sudo and tee
+$ echo '127.0.0.1 bob' | sudo tee /etc/hosts
+127.0.0.1 bob # tee shows output on console
+$ cat /etc/hosts
+127.0.0.1 bob # hmm... shoulda used tee -a
+```
+
+## Archiving Files
+
+### Using the tar Command
+
+`tar` - tape archive (historical definition)
+
+`-c` === `--create`
+
+`-v` verbose switch
+
+`-vv` also show file permissions as they're being backed up
+
+`-f` === `--file` specify file you want to back up to
+
+`-t` === `--list` list contents of tar
+
+`-x` === `--extract` extract contents of archive
+
+`--directory` specify where to extract to (if not given, defaults to current directory)
+
+Argument to tar is file/dir to be backed up
+
+Create an archive, leading `/` removed from file names because when a tar is restored, by default it restores to current directory, so file names must have relative names.
+
+```shell
+$ tar -cf doc.tar /usr/share/doc
+tar: Removing leading `/' from member names
+```
+
+Turn on verbose switch to see files as they're being backed up:
+
+```lang
+$ tar -cvf doc.tar /usr/share/doc
+tar: Removing leading `/' from member names
+/usr/share/doc/
+/usr/share/doc/dbus-1.10.24/
+/usr/share/doc/krb5-libs-1.15.1/
+/usr/share/doc/coreutils-8.22/
+/usr/share/doc/python-kitchen-1.1.1/
+...
+$ tar -cvvf doc.tar /usr/share/doc
+tar: Removing leading `/' from member names
+drwxr-xr-x root/root         0 2019-12-26 21:05 /usr/share/doc/
+drwxr-xr-x root/root         0 2019-03-14 10:18 /usr/share/doc/dbus-1.10.24/
+drwxr-xr-x root/root         0 2019-09-13 18:07 /usr/share/doc/krb5-libs-1.15.1/
+...
+```
+
+Show what's in a tar file:
+
+```shell
+$ tar --list --file=doc.tar
+usr/share/doc/
+usr/share/doc/dbus-1.10.24/
+usr/share/doc/krb5-libs-1.15.1/
+usr/share/doc/coreutils-8.22/
+...
+$ tar -tvf doc.tar # same as above but short form and add verbose switch
+drwxr-xr-x root/root         0 2019-12-26 21:05 usr/share/doc/
+drwxr-xr-x root/root         0 2019-03-14 10:18 usr/share/doc/dbus-1.10.24/
+drwxr-xr-x root/root         0 2019-09-13 18:07 usr/share/doc/krb5-libs-1.15.1/
+...
+```
+
+Extract tar contents, by default, expands to *current* directory:
+
+```shell
+$ tar -xvf doc.tar
+usr/share/doc/
+usr/share/doc/dbus-1.10.24/
+usr/share/doc/krb5-libs-1.15.1/
+usr/share/doc/coreutils-8.22/
+...
+$ cd usr
+$ ls
+share
+```
+
+Restore to original location:
+
+```shell
+$ tar -xvf doc.tar --directory=/
+```
+
+Incremental backups - backup files that have changed since last backup:
+
+`-g` indicate .snar file - mix of snapshot and tar - records changes in file system between backups. If snar file doesn't exist, it will be created and full backup will be run.
+
+```shell
+$ mkdir test
+$ cd test
+$ touch hosts hostname services
+$ cd ..
+# Day 0: kick off incremental backup of test dir
+$ tar -cvf my0.tar -g my.snar test
+tar: test: Directory is new
+test/
+test/hostname
+test/hosts
+test/services
+# Day 1: some files get updated, run incremental update again, specifying new archive but same snar file
+$ echo hi >> test/hosts
+$ tar -cvf my1.tar -g my.snar test
+# only modified file gets backed up
+test/
+test/hosts
+# Day 2: some file gets removed
+$ rm -f test/hostname
+$ tar -cvf my2.tar -g my.snar test
+test/
+# Day 3: Disaster strikes, test dir is removed
+$ rm -rf test
+# Restore from Day 0 backup
+$ tar -xvf my0.tar -g /dev/null
+test/
+test/hostname
+test/hosts
+test/services
+# Restore from Day 1 backup
+$ tar -xvf my1.tar -g /dev/null
+test/
+test/hosts
+# Restore from Day 2 backup
+$ tar -xvf my2.tar -g /dev/null
+test/
+tar: Deleting `test/hostname'
+```
+
+### Using Compression
+
+`gzip`/`gunzip` - compress/uncompress
+
+`file` - command to show what type of file some file is.
+
+`tar -z` - tar and compress with gzip
+
+`tar -j` - tar and compress with bzip2
+
+Working with `doc.tar` file created earlier, gzip removes the tar and replaces with tar.gz file:
+
+```shell
+$ ls -lh doc.*
+-rw-r--r-- 1 root root 20K Dec 27 14:21 doc.tar
+$ gzip doc.tar
+$ ls -lh doc.*
+-rw-r--r-- 1 root root  695 Dec 27 14:21 doc.tar.gz
+# look at file
+$ file doc.tar.gz
+doc.tar.gz: gzip compressed data, was "doc.tar", from Unix, last modified: Fri Dec 27 14:21:02 2019
+# unzip -> removes .gz file and just leaves the .tar file
+$ gunzip doc.tar.gz
+$ ls -lh doc*
+-rw-r--r-- 1 root root 20K Dec 27 14:21 doc.tar
+$ file doc.tar
+doc.tar: POSIX tar archive (GNU)
+```
+
+`bzip2` - further compression, first install: `yum install bzip2`
+
+```shell
+$ bzip2 doc.tar
+$ ls -lh doc*
+-rw-r--r-- 1 root root 605 Dec 27 14:21 doc.tar.bz2
+$ file doc.tar.bz2
+doc.tar.bz2: bzip2 compressed data, block size = 900k
+$ bunzip2 doc.tar.bz2
+$ ls -lh doc*
+-rw-r--r-- 1 root root 20K Dec 27 14:21 doc.tar
+```
+
+How long does tar take? Start from `/tmp` dir, then backup `$HOME`:
+
+```shell
+$ cd /tmp
+$ time tar -cvf myhome.tar $HOME
+tar: Removing leading `/' from member names
+/root/
+/root/.bash_profile
+/root/.tcshrc
+/root/anaconda-ks.cfg
+/root/.bash_logout
+/root/.cshrc
+/root/.bashrc
+...
+/root/file99
+
+real    0m0.012s
+user    0m0.000s
+sys     0m0.000s
+
+# tar with compression is a little faster (but for instructor was slower)
+$ time tar -cvzf myhome.tar.gz $HOME
+...
+/root/my2.tar
+/root/my0.tar
+/root/file99
+
+real    0m0.009s
+user    0m0.000s
+sys     0m0.000s
+
+# tar and bzip2 compression slightly faster but for instructor was slower
+$ time tar -cvjf myhome.tar.bz2 $HOME
+...
+/root/my2.tar
+/root/my0.tar
+/root/file99
+
+real    0m0.008s
+user    0m0.000s
+sys     0m0.000s
+```
+
+Have to balance compressed size with how long it takes to generate it.
+
+## Understanding File Permissions
+
+### Listing Permissions
+
+Long list on a shell script:
+
+```shell
+$ ls -l /usr/lib/dracut/dracut-init.sh
+-rwxr-xr-x 1 root root 1188 Aug  8 23:14 /usr/lib/dracut/dracut-init.sh
+```
+
+Breaking down `-rwxr-xr-x`
+
+`-` regular file
+`rwx` read/write/execute for file owner (root in above example)
+`r-x` read/execute for group owner belongs to (root in above example)
+`r-x` read/execute for others
+
+Permissions shown with `ls -l` are shown *symbolically* (rwx), use `stat` for complete metadata:
+
+```shell
+$ stat /usr/lib/dracut/dracut-init.sh
+  File: '/usr/lib/dracut/dracut-init.sh'
+  Size: 1188            Blocks: 8          IO Block: 4096   regular file
+Device: 801h/2049d      Inode: 2360184     Links: 1
+Access: (0755/-rwxr-xr-x)  Uid: (    0/    root)   Gid: (    0/    root)
+Access: 2019-08-08 23:14:24.000000000 +0000
+Modify: 2019-08-08 23:14:24.000000000 +0000
+Change: 2019-12-15 17:44:58.576242164 +0000
+ Birth: -
+```
+
+Access line shows permission numerically (aka octally 0 through 7): `0755`
+
+Extract symbolic and numeric permissions with stat:
+
+```shell
+$ stat -c %A /usr/lib/dracut/dracut-init.sh
+-rwxr-xr-x
+$ stat -c %A /usr/lib/dracut/dracut-init.sh
+755
+```
+
+`777` Max permission
+
+* `4` = read
+* `2` = write
+* `1` = execute
+
+`7` = r + w + x (for owner)
+
+`5` = r + x (for group)
+
+`5` = r + x (for others)
+
+### Managing Default Permissions
+
+Note: Instructor was not very clear on `umask`, see this for [better explanation](https://linoxide.com/how-tos/umask-set-permission/)
+
+0 -- Read, Write and Execute
+1 – Read and Write
+2 – Read and Execute
+3 – Read Only
+4 –Write and Execute
+5 –Write Only
+6 –Execute Only
+7 –No Permissions
+
+`umask 077` means:
+
+0 – Owner – Read, Write and Execute
+7 – Group – No Permissions
+7 – Others – No Permissions
+
+Default permissions are read/write for user, group and others `rw-rw-rw-` but can be affected by `umask`.
+
+`umask` can only be used to *remove* permissions, cannot add.
+
+Do as regular user:
+
+```shell
+$ su - course
+$ ls -l file1
+-rw-rw-r-- 1 course course 0 Dec 27 20:22 file1
+$ umask
+0002 # `2` being in others block -> write is being removed from others
+$ umask 0
+$ umask
+0000
+$ touch file2
+$ ls -l file1 file2
+-rw-rw-r-- 1 course course 0 Dec 27 20:22 file1 # created with umask 0002
+-rw-rw-rw- 1 course course 0 Dec 27 20:25 file2 # created with umask 0000
+$ stat -c %a file1
+664
+$ stat -c %a file2
+666
+```
+
+For further default privacy on files:
+
+```shell
+$ umask 27
+$ touch file3
+$ ls -l
+-rw-rw-r-- 1 course course 0 Dec 27 20:22 file1
+-rw-rw-rw- 1 course course 0 Dec 27 20:25 file2
+-rw-r----- 1 course course 0 Dec 27 21:38 file3
+$ umask 77
+$ touch file4
+$ ls -l
+-rw-rw-r-- 1 course course 0 Dec 27 20:22 file1
+-rw-rw-rw- 1 course course 0 Dec 27 20:25 file2
+-rw-r----- 1 course course 0 Dec 27 21:38 file3
+-rw------- 1 course course 0 Dec 27 21:39 file4
+```
+
+`umask` usually set octally because that's how it's displayed, represents what to block.
+
+Can also set symbolically:
+
+```shell
+$ umask u=rwx,g=rx,o=rx # === umask 033
+$ touch file5
+$ ls -l
+-rw-rw-r-- 1 course course 0 Dec 27 20:22 file1
+-rw-rw-rw- 1 course course 0 Dec 27 20:25 file2
+-rw-r----- 1 course course 0 Dec 27 21:38 file3
+-rw------- 1 course course 0 Dec 27 21:39 file4
+-rw-r--r-- 1 course course 0 Dec 27 22:48 file5
+$ umask 033
+$ touch file6
+$ ls -l
+-rw-rw-r-- 1 course course 0 Dec 27 20:22 file1
+-rw-rw-rw- 1 course course 0 Dec 27 20:25 file2
+-rw-r----- 1 course course 0 Dec 27 21:38 file3
+-rw------- 1 course course 0 Dec 27 21:39 file4
+-rw-r--r-- 1 course course 0 Dec 27 22:48 file5
+-rw-r--r-- 1 course course 0 Dec 27 22:48 file6
+```
+
+Set private umask:
+
+```shell
+$ umask u=rwx,go=
+$ umask
+0077
+$ touch file7
+$ ls -l
+-rw-rw-r-- 1 course course 0 Dec 27 20:22 file1
+-rw-rw-rw- 1 course course 0 Dec 27 20:25 file2
+-rw-r----- 1 course course 0 Dec 27 21:38 file3
+-rw------- 1 course course 0 Dec 27 21:39 file4
+-rw-r--r-- 1 course course 0 Dec 27 22:48 file5
+-rw-r--r-- 1 course course 0 Dec 27 22:48 file6
+-rw------- 1 course course 0 Dec 27 22:51 file7
+```
+
+### Setting Permissions
+
+`chmod` change permission, can use numeric or symbols.
+
+Logged in as user `course`, add some content to `file` created earlier with default umask:
+
+```shell
+$ ls file1
+rw-rw-r-- 1 course course 0 Dec 27 20:22 file1
+$ vi file1
+$ cat file1
+this is content
+$ chmod 467 file1 # === chmod u=r,g=rw,o=rwx file1
+$ ls -l file1
+-r--rw-rwx 1 course course 16 Dec 27 23:35 file1
+$ vim file1
+# vim status line shows: "file1" [readonly] 1L, 16C
+```
+
+Even though file is read-only to user, still allowed to delete it, because delete is actually a write operation on the parent directory. In this case user has `rwx` on its own home dir `/home/course`.
+
+If there is match on user id, group id is not checked. So in this case, only have read on `file1`.
+
+Modify permissions for all - use `+` or `-` characters:
+
+```shell
+$ ls -l file2
+-rw-rw-rw- 1 course course 0 Dec 27 20:25 file2
+$ chmod a+x file2 # add execute for all - user, group, and others
+$ ls -l file2
+-rwxrwxrwx 1 course course 0 Dec 27 20:25 file2
+$ chmod a-x file2 # remove execute for all - user, group, and others
+$ ls -l file2
+-rw-rw-rw- 1 course course 0 Dec 27 20:25 file2
+$ chmod o= file2 # make it private to others
+$ ls -l file2
+-rw-rw---- 1 course course 0 Dec 27 20:25 file2
+$ chmod 777 file2 # make it open to the world
+$ ls -l file2
+-rwxrwxrwx 1 course course 0 Dec 27 20:25 file2
+$ chmod go= file2 # remove permissions from group and others
+$ ls -l file2
+-rwx------ 1 course course 0 Dec 27 20:25 file2
+```
+
+*sticky bit* controls deletions from directory, eg: `/tmp` has sticky bit set, shown in ls displayas `t`.
+
+lower case t - execute set on dir
+
+upper case T - execute not set on dir
+
+When sticky bit is set on dir, only owner of the file can delete from that dir.
+
+```shell
+$ umask 0077
+$ ls -ld /tmp
+drwxrwxrwt 1 root root 4096 Dec 28 14:41 /tmp
+```
+
+To create dir with sticky bit set, value is `1`:
+
+`-m` mode when creating dir
+
+```shell
+$ mkdir -m 1777 test
+$ ls -ld test
+drwxrwxrwt 2 course course 4096 Dec 28 15:02 test
+```
+
+Remove sticky bit from dir, for others:
+
+```shell
+$ chmod o-t test
+$ ls -ld test
+drwxrwxrwx 2 course course 4096 Dec 28 15:02 test
+```
+
+Can also control group, for example `/bin/wall` is owned by `root` but group is `tty`, so when `wall` is run, runs with permissions of `tty` group.
+
+```shell
+$ ls -l $(which wall)
+-r-xr-sr-x 1 root tty 15344 Jun  9  2014 /bin/wall
+```
+
+### Managing File Ownership
+
