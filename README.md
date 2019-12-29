@@ -1920,3 +1920,83 @@ $ ls -l $(which wall)
 
 ### Managing File Ownership
 
+User owner vs Group owner.
+
+`id -u` - show user id of currently logged in user
+
+`id -un` - show username
+
+`id -gn` - show primary group name
+
+`id -Gn` - show secondary group (aka complementary groups)
+
+`chgrp <user> <file>` Change group to any group user belongs to
+
+`newgrp <group>` Change primary group -> creates new shell, `exit` to get back to your previous group/shell
+
+When creating files, primary group is used.
+
+When accessing file resources, complementary groups are used.
+
+In example below, `file2` was created by user `course`, i.e. course is the *user owner*.
+
+*primary group id* of `course` user is the `course` group, this is *group owner*.
+
+```shell
+$ ls -l file2
+-rwx------ 1 course course 0 Dec 27 20:25 file2
+$ id -u
+1000
+$ id -un
+course
+$ id -gn
+course
+$ id -Gn
+course wheel # wheel group is centos admin group
+$ chgrp wheel file2
+$ ls -l file2
+-rwx------ 1 course wheel 0 Dec 27 20:25 file2 # now wheel group takes ownership
+$ newgrp wheel
+$ id -gn
+wheel
+$ touch newgroup
+$ ls -l newgroup
+-rw-r--r-- 1 course wheel 0 Dec 29 20:31 newgroup # wheel is now the owner of group
+$ exit
+$ id -gn
+course
+```
+
+CANNOT change user owner, as regular user, need root privileges.
+
+`exit` out of `course` user to get to `root`
+
+`chown <user> <file>` change file owner to a different user
+
+`chown <user>.<group> <file>` change user and group ownership for file, can use `.` or `:` separator
+
+```shell
+$ cd /home/course
+$ ls -l file2
+-rwx------ 1 course wheel 0 Dec 27 20:25 file2
+$ hown root file2
+$ ls -l file2
+-rwx------ 1 root wheel 0 Dec 27 20:25 file2 # now root is owner
+$ chown course.course file2
+$ ls -l file2
+-rwx------ 1 course course 0 Dec 27 20:25 file2
+```
+
+Regardless of file ownership, when `root` user copies it, user and group owner will change to `root`, however, this may not be desirable, eg: when backing up files.
+
+`cp -a` copy file maintaining original timestamps and ownership - need to be root to run this.
+
+```shell
+$ cp file2 /root/file2na
+$ ls -l !$
+ls -l /root/file2na
+-rwx------ 1 root root 0 Dec 29 20:44 /root/file2na
+$ cp -a file2 /root/file2a
+$ ls -l !$
+-rwx------ 1 course course 0 Dec 27 20:25 /root/file2a
+```
