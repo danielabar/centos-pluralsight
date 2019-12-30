@@ -39,6 +39,9 @@
     - [Managing Default Permissions](#managing-default-permissions)
     - [Setting Permissions](#setting-permissions)
     - [Managing File Ownership](#managing-file-ownership)
+  - [Script](#script)
+    - [Record Sessions](#record-sessions)
+    - [Remote Collaboration](#remote-collaboration)
 
 <!-- END doctoc generated TOC please keep comment here to allow auto update -->
 
@@ -88,6 +91,7 @@ $ docker exec -it centoscourse bash
 - `ls` list files, defaults to with color coding
 - `type ls` -> aliased to `ls --color=auto` (alias created with login script)
 - `ls -a` list all including hidden files
+- `ls -A` like `-a` but do not show `.` and `..` directories
 - `ls -aF` show directories with forward slash at the end
 - hidden files/dirs begin with `.`
 - Ctrl + L: clear screen
@@ -1999,4 +2003,77 @@ ls -l /root/file2na
 $ cp -a file2 /root/file2a
 $ ls -l !$
 -rwx------ 1 course course 0 Dec 27 20:25 /root/file2a
+```
+
+## Script
+
+### Record Sessions
+
+Setup: Open two shells, one login as `course` user, another login as `root`.
+
+Start in `course` session:
+
+```shell
+$ script # by default, writes to file `typescript`, all commands and output are recorded through to this file
+Script started, file is typescript
+$ ls -l typescript
+-rw-rw-r-- 1 course course 0 Dec 30 12:01 typescript
+$ exit
+exit
+Script done, file is typescript
+$ cat typescript
+Script started on Mon Dec 30 12:01:59 2019
+[course@4126a0b299d3 ~]$ ls -l typescript
+-rw-rw-r-- 1 course course 0 Dec 30 12:01 typescript
+[course@4126a0b299d3 ~]$ exit
+exit
+
+Script done on Mon Dec 30 12:04:53 2019
+```
+
+### Remote Collaboration
+
+`script -f` - send script output to a particular file, this could also be a named pipe.
+
+Again starting with `course` user shell:
+
+```shell
+$ mkfifo /tmp/mypipe
+$ script -f /tmp/mypipe
+# pipe isn't being read right now so will not get any response from console
+```
+
+In `root` user shell:
+
+```shell
+$ cat /tmp/mypipe
+Script started on Mon Dec 30 12:13:33 2019
+$
+```
+
+Back in `course` user shell, when pipe is read by `root` user, returns control to shell.
+
+Now anything typed in by `course` user will be output to `root` user's shell via named pipe `/tmp/mypipe`
+
+```shell
+Script started, file is /tmp/mypipe
+$ ls # this command and output also shows up in root user's shell
+epel-release-latest-7.noarch.rpm  file3  file5  file7     test
+file2                             file4  file6  newgroup  typescript
+$ exit # finish writing to pipe, breaks connection
+exit
+Script done, file is /tmp/mypipe
+```
+
+`root` user shell sees:
+
+```shell
+course@4126a0b299d3 ~]$ ls
+epel-release-latest-7.noarch.rpm  file3  file5  file7     test
+file2                             file4  file6  newgroup  typescript
+[course@4126a0b299d3 ~]$ exit
+exit
+
+Script done on Mon Dec 30 12:17:17 2019
+[root@4126a0b299d3 /]#
 ```
